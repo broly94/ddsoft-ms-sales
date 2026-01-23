@@ -105,6 +105,91 @@ def get_recorrido_from_db():
         return pd.DataFrame(data)
     finally:
         db.close()
+
+def get_all_recorridos(
+    limit: int = 100, 
+    offset: int = 0, 
+    search_vendedor: str = None,
+    search_cliente: str = None,
+    linea: str = None,
+    bloque: str = None,
+    semana: int = None,
+    dia: str = None
+):
+    db = SessionLocal()
+    try:
+        query = db.query(RecorridoModel)
+        
+        if search_vendedor:
+            query = query.filter(RecorridoModel.vendedor.ilike(f"%{search_vendedor}%"))
+            
+        if search_cliente:
+            query = query.filter(RecorridoModel.cliente.ilike(f"%{search_cliente}%"))
+            
+        if linea and linea != "all":
+            # linea_origen suele ser "Linea 1", "Linea 2", etc.
+            query = query.filter(RecorridoModel.linea_origen.ilike(f"%{linea}%"))
+            
+        if bloque and bloque != "all":
+            query = query.filter(RecorridoModel.bloque.ilike(f"%{bloque}%"))
+            
+        if semana and semana != 0:
+            query = query.filter(RecorridoModel.semana_prog == semana)
+            
+        if dia and dia != "all":
+            query = query.filter(RecorridoModel.dia_prog.ilike(f"{dia}"))
+        
+        total = query.count()
+        items = query.order_by(RecorridoModel.id.desc()).offset(offset).limit(limit).all()
+        
+        return items, total
+    finally:
+        db.close()
+
+def get_recorrido_by_id(recorrido_id: int):
+    db = SessionLocal()
+    try:
+        return db.query(RecorridoModel).filter(RecorridoModel.id == recorrido_id).first()
+    finally:
+        db.close()
+
+def create_recorrido(data: dict):
+    db = SessionLocal()
+    try:
+        db_item = RecorridoModel(**data)
+        db.add(db_item)
+        db.commit()
+        db.refresh(db_item)
+        return db_item
+    finally:
+        db.close()
+
+def update_recorrido(recorrido_id: int, data: dict):
+    db = SessionLocal()
+    try:
+        db_item = db.query(RecorridoModel).filter(RecorridoModel.id == recorrido_id).first()
+        if not db_item:
+            return None
+        for key, value in data.items():
+            setattr(db_item, key, value)
+        db.commit()
+        db.refresh(db_item)
+        return db_item
+    finally:
+        db.close()
+
+def delete_recorrido(recorrido_id: int):
+    db = SessionLocal()
+    try:
+        db_item = db.query(RecorridoModel).filter(RecorridoModel.id == recorrido_id).first()
+        if not db_item:
+            return False
+        db.delete(db_item)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
 def save_resultados_to_db(df_res: pd.DataFrame):
     db = SessionLocal()
     try:

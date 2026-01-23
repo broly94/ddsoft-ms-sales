@@ -3,7 +3,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import pandas as pd
 import io
 from src.core.route_validator.service import RouteValidator
-from src.models.route_models import save_recorrido_to_db, get_recorrido_from_db, save_resultados_to_db, get_historial_validaciones, save_lista_resultados_to_db
+from src.models.route_models import (
+    save_recorrido_to_db, 
+    get_recorrido_from_db, 
+    save_resultados_to_db, 
+    get_historial_validaciones, 
+    save_lista_resultados_to_db,
+    get_all_recorridos,
+    get_recorrido_by_id,
+    create_recorrido,
+    update_recorrido,
+    delete_recorrido
+)
 
 router = APIRouter(prefix="/route-validator", tags=["Route Validator"])
 
@@ -25,6 +36,67 @@ async def upload_recorrido(file: UploadFile = File(...)):
         
         save_recorrido_to_db(df_prog)
         return {"message": "Archivo de recorrido cargado y guardado en base de datos correctamente.", "filas": len(df_prog)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/recorrido")
+async def list_recorridos(
+    limit: int = 100, 
+    offset: int = 0, 
+    search_vendedor: str = None, 
+    search_cliente: str = None,
+    linea: str = None,
+    bloque: str = None,
+    semana: int = None,
+    dia: str = None
+):
+    try:
+        items, total = get_all_recorridos(
+            limit=limit, 
+            offset=offset, 
+            search_vendedor=search_vendedor,
+            search_cliente=search_cliente,
+            linea=linea,
+            bloque=bloque,
+            semana=semana,
+            dia=dia
+        )
+        return {"items": items, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/recorrido/{id}")
+async def get_recorrido(id: int):
+    item = get_recorrido_by_id(id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Recorrido no encontrado")
+    return item
+
+@router.post("/recorrido")
+async def add_recorrido(data: dict = Body(...)):
+    try:
+        item = create_recorrido(data)
+        return item
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/recorrido/{id}")
+async def edit_recorrido(id: int, data: dict = Body(...)):
+    try:
+        item = update_recorrido(id, data)
+        if not item:
+            raise HTTPException(status_code=404, detail="Recorrido no encontrado")
+        return item
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/recorrido/{id}")
+async def remove_recorrido(id: int):
+    try:
+        success = delete_recorrido(id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Recorrido no encontrado")
+        return {"message": "Recorrido eliminado correctamente"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
