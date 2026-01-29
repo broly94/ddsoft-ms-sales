@@ -22,12 +22,16 @@ class FrecuenciaRepository:
             if isinstance(f_hasta, str):
                 try: f_hasta = datetime.strptime(f_hasta, "%d/%m/%Y")
                 except: f_hasta = pd.to_datetime(f_hasta)
+            
+            # Obtener semana_inicio (default 1 si no está definido)
+            semana_inicio = metadata.get('semana_inicio', 1)
 
             # 2. AxumGPS (ex-frecuencia_header, metadata del procesamiento)
             axum_gps = AxumGpsModel(
                 batch_id=batch_id,
                 fecha_desde=f_desde,
-                fecha_hasta=f_hasta
+                fecha_hasta=f_hasta,
+                semana_inicio=semana_inicio
             )
             db.add(axum_gps)
             db.flush()
@@ -209,3 +213,177 @@ class FrecuenciaRepository:
             }
         finally:
             db.close()
+    
+    @staticmethod
+    def get_batch_details_with_cliente_count(batch_id: str):
+        """Obtiene detalles de un batch incluyendo conteo de clientes únicos por vendedor (SOLO RESUMEN)"""
+        db = SessionLocal()
+        try:
+            axum_gps = db.query(AxumGpsModel).filter(AxumGpsModel.batch_id == batch_id).first()
+            if not axum_gps: return None
+            
+            # Obtener frecuencia_headers
+            frecuencia_headers = db.query(FrecuenciaHeaderModel).filter(
+                FrecuenciaHeaderModel.axum_gps_id == axum_gps.id
+            ).all()
+            
+            # Contar clientes únicos por vendedor usando una query agregada (más eficiente)
+            from sqlalchemy import func, distinct
+            vendedor_stats = db.query(
+                FrecuenciaModel.vendedor,
+                func.count(distinct(FrecuenciaModel.cliente)).label('total_clientes')
+            ).filter(
+                FrecuenciaModel.axum_gps_id == axum_gps.id
+            ).group_by(FrecuenciaModel.vendedor).all()
+            
+            # Crear un diccionario de vendedor -> total_clientes
+            vendedor_clientes_count = {stat.vendedor: stat.total_clientes for stat in vendedor_stats}
+            
+            # Construir response con headers y conteo de clientes
+            headers_with_count = []
+            for header in frecuencia_headers:
+                total_clientes = vendedor_clientes_count.get(header.vendedor, 0)
+                headers_with_count.append({
+                    "vendedor": header.vendedor,
+                    "tiempo_pdv_total": header.tiempo_pdv_total,
+                    "total_clientes": total_clientes
+                })
+            
+            # NO cargamos todos los detalles de frecuencia para evitar cargar 25k+ registros
+            # Retornamos solo metadata y el resumen
+            return {
+                "batch_id": axum_gps.batch_id,
+                "fecha_desde": axum_gps.fecha_desde.strftime("%Y-%m-%d") if axum_gps.fecha_desde else None,
+                "fecha_hasta": axum_gps.fecha_hasta.strftime("%Y-%m-%d") if axum_gps.fecha_hasta else None,
+                "fecha_proceso": axum_gps.fecha_proceso.strftime("%Y-%m-%d %H:%M:%S") if axum_gps.fecha_proceso else None,
+                "frecuencia_headers": headers_with_count,
+                "total_visitas": db.query(FrecuenciaModel).filter(FrecuenciaModel.axum_gps_id == axum_gps.id).count()
+            }
+        finally:
+            db.close()
+    
+    @staticmethod
+    def get_batch_hours(batch_id: str):
+        """Obtiene el resumen de horas (horas_header) de un batch específico"""
+        db = SessionLocal()
+        try:
+            axum_gps = db.query(AxumGpsModel).filter(AxumGpsModel.batch_id == batch_id).first()
+            if not axum_gps: return None
+            
+            # Obtener horas_header (resumen por vendedor)
+            horas_header = db.query(HorasHeaderModel).filter(
+                HorasHeaderModel.axum_gps_id == axum_gps.id
+            ).all()
+            
+            # Construir response
+            horas_data = []
+            for hora in horas_header:
+                horas_data.append({
+                    "vendedor": hora.vendedor,
+                    "horas_totales": hora.horas_totales,
+                    "dias_trabajados": hora.dias_trabajados,
+                    "promedio_horas_diarias": hora.promedio_horas_diarias,
+                    "promedio_checkin": hora.promedio_checkin,
+                    "promedio_checkout": hora.promedio_checkout,
+                    "viatico": hora.viatico,
+                    "linea": hora.linea
+                })
+            
+            return {
+                "batch_id": axum_gps.batch_id,
+                "fecha_desde": axum_gps.fecha_desde.strftime("%Y-%m-%d") if axum_gps.fecha_desde else None,
+                "fecha_hasta": axum_gps.fecha_hasta.strftime("%Y-%m-%d") if axum_gps.fecha_hasta else None,
+                "fecha_proceso": axum_gps.fecha_proceso.strftime("%Y-%m-%d %H:%M:%S") if axum_gps.fecha_proceso else None,
+                "horas_header": horas_data
+            }
+        finally:
+            db.close()
+    
+    @staticmethod
+    def get_recent_frecuencia(limit: int = 50, vendedor: str = None, cliente: str = None, batch_id: str = None):
+        """Obtiene las últimas N visitas de frecuencia con filtros opcionales"""
+        db = SessionLocal()
+        try:
+            query = db.query(FrecuenciaModel)
+            
+            # Aplicar filtros si se proporcionan
+            if vendedor:
+                query = query.filter(FrecuenciaModel.vendedor.ilike(f"%{vendedor}%"))
+            if cliente:
+                query = query.filter(FrecuenciaModel.cliente.ilike(f"%{cliente}%"))
+            if batch_id:
+                # Buscar el axum_gps_id correspondiente al batch_id
+                axum_gps = db.query(AxumGpsModel).filter(AxumGpsModel.batch_id == batch_id).first()
+                if axum_gps:
+                    query = query.filter(FrecuenciaModel.axum_gps_id == axum_gps.id)
+            
+            # Ordenar por fecha más reciente y limitar
+            visitas = query.order_by(FrecuenciaModel.fecha_checkin.desc()).limit(limit).all()
+            
+            # Construir response
+            visitas_data = []
+            for visita in visitas:
+                visitas_data.append({
+                    "id": visita.id,
+                    "batch_id": visita.batch_id,
+                    "vendedor": visita.vendedor,
+                    "cliente": visita.cliente,
+                    "fecha_checkin": visita.fecha_checkin.strftime("%Y-%m-%d %H:%M:%S") if visita.fecha_checkin else None,
+                    "fecha_checkout": visita.fecha_checkout.strftime("%Y-%m-%d %H:%M:%S") if visita.fecha_checkout else None,
+                    "tiempo_pdv_original": visita.tiempo_pdv_original,
+                    "tiempo_pdv_limitado": visita.tiempo_pdv_limitado,
+                    "dia_real": visita.dia_real,
+                    "semana_real": visita.semana_real,
+                    "programacion": visita.programacion,
+                    "bloque": visita.bloque,
+                    "linea": visita.linea,
+                    "estado": visita.estado
+                })
+            
+            return {
+                "visitas": visitas_data,
+                "total": len(visitas_data),
+                "filtros_aplicados": {
+                    "vendedor": vendedor,
+                    "cliente": cliente,
+                    "batch_id": batch_id,
+                    "limit": limit
+                }
+            }
+        finally:
+            db.close()
+
+    @staticmethod
+    def get_frecuencia_summary(vendedor: str = None, batch_id: str = None):
+        """Obtiene el resumen de tiempos totales por vendedor (desde FrecuenciaHeaderModel)"""
+        db = SessionLocal()
+        try:
+            query = db.query(FrecuenciaHeaderModel)
+            
+            if batch_id:
+                axum_gps = db.query(AxumGpsModel).filter(AxumGpsModel.batch_id == batch_id).first()
+                if axum_gps:
+                    query = query.filter(FrecuenciaHeaderModel.axum_gps_id == axum_gps.id)
+            else:
+                # Si no hay batch_id, buscar el último procesado
+                last_gps = db.query(AxumGpsModel).order_by(AxumGpsModel.fecha_proceso.desc()).first()
+                if last_gps:
+                    query = query.filter(FrecuenciaHeaderModel.axum_gps_id == last_gps.id)
+            
+            if vendedor:
+                query = query.filter(FrecuenciaHeaderModel.vendedor.ilike(f"%{vendedor}%"))
+            
+            headers = query.all()
+            
+            resumen = []
+            for h in headers:
+                resumen.append({
+                    "vendedor": h.vendedor,
+                    "tiempo_pdv_total": h.tiempo_pdv_total,
+                    "batch_id": h.axum_gps.batch_id if h.axum_gps else batch_id
+                })
+            
+            return resumen
+        finally:
+            db.close()
+

@@ -16,6 +16,62 @@ async def get_history():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/history/{batch_id}")
+async def get_batch_details(batch_id: str):
+    try:
+        result = FrecuenciaService.get_batch_details(batch_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Batch no encontrado")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/history/{batch_id}/hours")
+async def get_batch_hours(batch_id: str):
+    try:
+        result = FrecuenciaService.get_batch_hours(batch_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Batch no encontrado")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/frecuencia/recent")
+async def get_recent_frecuencia(
+    limit: int = 50, 
+    vendedor: str = None, 
+    cliente: str = None,
+    batch_id: str = None
+):
+    """
+    Obtiene las últimas N visitas de frecuencia con filtros opcionales.
+    - limit: Cantidad de registros a retornar (default: 50)
+    - vendedor: Filtro por vendedor (búsqueda parcial)
+    - cliente: Filtro por cliente (búsqueda parcial)
+    - batch_id: Filtro por batch específico
+    """
+    try:
+        return FrecuenciaService.get_recent_frecuencia(limit, vendedor, cliente, batch_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/frecuencia/summary")
+async def get_frecuencia_summary(
+    vendedor: str = None,
+    batch_id: str = None
+):
+    """
+    Obtiene el resumen de tiempos totales por vendedor.
+    """
+    try:
+        return FrecuenciaService.get_frecuencia_summary(vendedor, batch_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/recorrido/upload")
 async def upload_recorrido(file: UploadFile = File(...)):
     try:

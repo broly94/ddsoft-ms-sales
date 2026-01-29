@@ -30,6 +30,7 @@ class AxumGpsModel(Base):
     fecha_proceso = Column(DateTime, default=datetime.utcnow)
     fecha_desde = Column(DateTime)
     fecha_hasta = Column(DateTime)
+    semana_inicio = Column(Integer)  # Semana de inicio configurada (1 o 2)
     
     # Relationships
     frecuencias = relationship("FrecuenciaModel", back_populates="axum_gps", cascade="all, delete-orphan")
@@ -112,7 +113,6 @@ def init_db():
     while retries > 0:
         try:
             Base.metadata.create_all(bind=engine)
-            # Seed initial viatico config if empty
             db = SessionLocal()
             if db.query(ViaticoConfigModel).count() == 0:
                 db.add(ViaticoConfigModel(zona="CABA_GBA", valor=0.0))
